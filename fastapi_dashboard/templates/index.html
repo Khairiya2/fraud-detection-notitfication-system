@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Fraud Detection Dashboard</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+        h1 { color: #1e3a5f; border-bottom: 3px solid #f59e0b; padding-bottom: 8px; }
+        h2 { color: #1e3a5f; margin-top: 30px; }
+
+        .cards { display: flex; gap: 16px; margin: 16px 0; }
+        .card {
+            background: white; padding: 16px 24px;
+            border-radius: 8px; border: 1px solid #ddd;
+            text-align: center; min-width: 140px;
+        }
+        .card .num { font-size: 32px; font-weight: bold; }
+        .card .lbl { font-size: 12px; color: #666; }
+        .red   { color: #dc2626; }
+        .amber { color: #d97706; }
+        .green { color: #16a34a; }
+
+        table {
+            width: 100%; border-collapse: collapse;
+            background: white; border-radius: 8px;
+            border: 1px solid #ddd; font-size: 13px;
+        }
+        th { background: #1e3a5f; color: white; padding: 10px; text-align: left; }
+        td { padding: 8px 10px; border-bottom: 1px solid #eee; }
+        tr:hover td { background: #f9f9f9; }
+    </style>
+</head>
+<body>
+
+<h1>Fraud Detection Dashboard</h1>
+<p style="color:#666;">Micro-Insurance Premium Collection Monitoring Ghana</p>
+
+<!-- SUMMARY CARDS -->
+<div class="cards">
+    <div class="card">
+        <div class="num">{{ summary.total_agents }}</div>
+        <div class="lbl">Total Agents</div>
+    </div>
+    <div class="card">
+        <div class="num red">{{ summary.high_risk }}</div>
+        <div class="lbl">High Risk</div>
+    </div>
+    <div class="card">
+        <div class="num amber">{{ summary.missed_payments }}</div>
+        <div class="lbl">Missed Payments</div>
+    </div>
+    <div class="card">
+        <div class="num red">GHS {{ summary.total_gap }}</div>
+        <div class="lbl">Revenue Gap</div>
+    </div>
+</div>
+
+<!-- AGENT RISK -->
+<h2>Agent Risk Ranking</h2>
+<table>
+    <thead>
+        <tr>
+            <th>#</th><th>Agent ID</th><th>Name</th><th>Branch</th>
+            <th>Score</th><th>Gap (GHS)</th><th>Cash %</th><th>Level</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for a in agents %}
+        <tr>
+            <td>{{ loop.index }}</td>
+            <td>{{ a.agent_id }}</td>
+            <td>{{ a.name }}</td>
+            <td>{{ a.branch_name }}</td>
+            <td>
+                {% if a.risk_score >= 51 %}<b class="red">{{ a.risk_score }}</b>
+                {% elif a.risk_score >= 21 %}<b class="amber">{{ a.risk_score }}</b>
+                {% else %}<span class="green">{{ a.risk_score }}</span>{% endif %}
+            </td>
+            <td>
+                {% if a.gap_ghs and a.gap_ghs > 50 %}<b class="red">{{ a.gap_ghs }}</b>
+                {% else %}{{ a.gap_ghs or 0 }}{% endif %}
+            </td>
+            <td>{{ a.cash_ratio or 0 }}%</td>
+            <td>
+                {% if a.risk_score >= 51 %}<b class="red">Critical</b>
+                {% elif a.risk_score >= 21 %}<b class="amber">Medium</b>
+                {% else %}<span class="green">Low</span>{% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<!-- FRAUD HEATMAP -->
+<h2>Fraud Heatmap</h2>
+<table>
+    <thead>
+        <tr>
+            <th>Agent ID</th><th>Name</th><th>Branch</th>
+            <th>Off-Hours</th><th>Ghost Collections</th><th>Gap (GHS)</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for h in heatmap %}
+        <tr>
+            <td>{{ h.agent_id }}</td>
+            <td>{{ h.name }}</td>
+            <td>{{ h.branch_name }}</td>
+            <td>
+                {% if h.off_hours_count > 5 %}<b class="red">{{ h.off_hours_count }}</b>
+                {% else %}{{ h.off_hours_count }}{% endif %}
+            </td>
+            <td>
+                {% if h.ghost_count > 0 %}<b class="red">{{ h.ghost_count }}</b>
+                {% else %}<span class="green">0</span>{% endif %}
+            </td>
+            <td>
+                {% if h.gap_ghs and h.gap_ghs > 100 %}<b class="red">{{ h.gap_ghs }}</b>
+                {% else %}{{ h.gap_ghs or 0 }}{% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<!-- MISSED PAYMENTS -->
+<h2>Missed Payments</h2>
+<table>
+    <thead>
+        <tr>
+            <th>Customer ID</th>
+            <th>Name</th>
+            <th>Phone</th>
+            <th>Language</th>
+            <th>Agent</th>
+            <th>Branch</th>
+            <th>Cycles Missed</th>
+            <th>Priority</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for c in missed %}
+        <tr>
+            <td>{{ c.customers_id }}</td>
+            <td>{{ c.name }}</td>
+            <td>{{ c.phone }}</td>
+            <td>{{ c.language }}</td>
+            <td>{{ c.agent }}</td>
+            <td>{{ c.branch }}</td>
+            <td>
+                {% if c.cycles_missed >= 3 %}<b class="red">{{ c.cycles_missed }}</b>
+                {% elif c.cycles_missed == 2 %}<b class="amber">{{ c.cycles_missed }}</b>
+                {% else %}{{ c.cycles_missed }}{% endif %}
+            </td>
+            <td>
+                {% if c.cycles_missed >= 3 %}<b class="red">Urgent</b>
+                {% elif c.cycles_missed == 2 %}<b class="amber">High</b>
+                {% else %}<span class="green">Normal</span>{% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<!-- BRANCH PERFORMANCE -->
+<h2>Branch Performance</h2>
+<table>
+    <thead>
+        <tr>
+            <th>Branch</th><th>Agents</th><th>Collected (GHS)</th>
+            <th>Remitted (GHS)</th><th>Gap (GHS)</th><th>High Risk Agents</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for b in branches %}
+        <tr>
+            <td><b>{{ b.branch_name }}</b></td>
+            <td>{{ b.total_agents }}</td>
+            <td>{{ b.total_collected or 0 }}</td>
+            <td>{{ b.total_remitted or 0 }}</td>
+            <td>
+                {% if b.gap_ghs and b.gap_ghs > 100 %}<b class="red">{{ b.gap_ghs }}</b>
+                {% else %}{{ b.gap_ghs or 0 }}{% endif %}
+            </td>
+            <td>
+                {% if b.high_risk_agents and b.high_risk_agents > 0 %}
+                    <b class="red">{{ b.high_risk_agents }}</b>
+                {% else %}<span class="green">0</span>{% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<p style="color:#aaa;font-size:12px;margin-top:32px;text-align:center;">
+    Fraud Detection System — Ghana Micro-Insurance
+</p>
+<script>
+    setTimeout(function(){ location.reload(); }, 30000);
+</script>
+
+</body>
+</html>
