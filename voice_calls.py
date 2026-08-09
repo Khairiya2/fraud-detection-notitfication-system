@@ -1,14 +1,15 @@
 import psycopg2
 import psycopg2.extras
-import requests
-import time
 from datetime import datetime
+import time
+import random
 
-#Vapi credentials
-VAPI_API_KEY   = "f884a854-d355-4922-aa93-f078bf37ba08"
-VAPI_FROM      = "+17322854062"   # your Vapi phone number
-DEMO_TO        = "+233205712837"  # your verified number receives all calls
-VAPI_BASE_URL  = "https://api.vapi.ai"
+
+SIMULATION_MODE = True
+
+#Africa's Talking credentials
+AT_USERNAME = "sandbox"
+AT_API_KEY  = "2hle4W2xT"
 
 #Database connection
 DB = {
@@ -22,12 +23,12 @@ DB = {
 def get_db():
     return psycopg2.connect(**DB)
 
-# Voice messages per language and missed cycle count
+#Voice messages per language and missed cycle count
 MESSAGES = {
     "Twi": {
         1: "Mema wo akye. Wo insurance premium a woahwehwe no atwam. Yesre wo ka no ntem.",
         2: "Wo insurance premium atwam mprenu. Yesre wo ka no ntem anaase wo policy betwa.",
-        3: "Wo insurance premium atwam mprensa. Wo policy betwa wore mmere tiawa bi mu.",
+        3: "Saa! Wo insurance premium atwam mprensa. Wo policy betwa wore mmere tiawa bi mu.",
     },
     "Dagbani": {
         1: "N nye di tarigi. A insurance premium be n-palli. Ti kpeng a yi kpaha di wuhigu.",
@@ -37,12 +38,23 @@ MESSAGES = {
     "English": {
         1: "Hello. Your insurance premium payment is overdue. Please make your payment as soon as possible.",
         2: "Your insurance premium is 2 cycles overdue. Please pay urgently to keep your policy active.",
-        3: "Urgent. Your premium is 3 or more cycles overdue. Your policy is at risk of cancellation.",
+        3: "Urgent. Your insurance premium is 3 or more cycles overdue. Your policy is at risk of cancellation.",
     }
 }
 
 MAX_RETRIES = 3
-RETRY_DELAY = 5
+RETRY_DELAY = 2
+
+SIMULATED_RESPONSES = [
+    "no_response",
+    "no_response",
+    "already_paid",
+    "need_more_time",
+    "speak_to_agent",
+]
+
+def get_db():
+    return psycopg2.connect(**DB)
 
 def get_missed_customers():
     conn = get_db()
@@ -67,7 +79,6 @@ def get_missed_customers():
         HAVING (SELECT MAX(week_number) FROM collections) -
                COALESCE(MAX(co.week_number), 0) > 0
         ORDER BY cycles_missed DESC
-        LIMIT 3
     """)
     customers = [dict(r) for r in cur.fetchall()]
     cur.close()
@@ -114,64 +125,30 @@ def log_call(customers_id, agent_id, language, cycles_missed, response, notes):
     cur.close()
     conn.close()
 
-def make_call(message, customer_name):
-    """
-    Makes an outbound call via Vapi API.
-    Uses a simple assistant that reads the message aloud.
-    """
+def make_real_call(phone, message):
+    import africastalking
+    africastalking.initialize(AT_USERNAME, AT_API_KEY)
+    voice = africastalking.Voice
     try:
-        headers = {
-            "Authorization": f"Bearer {VAPI_API_KEY}",
-            "Content-Type": "application/json",
-        }
-
-        payload = {
-            "assistant": {
-                "firstMessage": message,
-                "model": {
-                    "provider": "openai",
-                    "model": "gpt-3.5-turbo",
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": (
-                                f"You are calling {customer_name} to remind them "
-                                f"about their overdue insurance premium payment. "
-                                f"Read the first message, then politely end the call."
-                            )
-                        }
-                    ]
-                },
-                "voice": {
-                    "provider": "11labs",
-                    "voiceId": "rachel"
-                },
-                "endCallMessage": "Thank you. Goodbye.",
-                "endCallPhrases": ["goodbye", "bye", "okay thanks", "I understand"],
-            },
-            "phoneNumberId": "32c4f851-ead8-4d6c-8c8f-a123238c04d7",
-            "customer": {
-                "number": DEMO_TO,
-                "name": customer_name,
-            },
-        }
-
-        response = requests.post(
-            f"{VAPI_BASE_URL}/call/phone",
-            headers=headers,
-            json=payload,
-            timeout=30
+        if phone.startswith("0"):
+            phone = "+233" + phone[1:]
+        response = voice.call(
+            callFrom="+254711XXXYYY",
+            callTo=[phone],
         )
-
-        if response.status_code in [200, 201]:
-            data = response.json()
-            call_id = data.get("id", "unknown")
-            return True, call_id
-        else:
-            return False, f"HTTP {response.status_code}: {response.text}"
-
+        return True, "call_placed", response
     except Exception as e:
-        return False, str(e)
+        return False, "no_response", str(e)
+
+def make_simulated_call(phone, message):
+    # Simulate network delay
+    time.sleep(0.5)
+    # 90% success rate in simulation
+    if random.random() < 0.90:
+        response = random.choice(SIMULATED_RESPONSES)
+        return True, response, "simulated"
+    else:
+        return False, "no_response", "simulated_failure"
 
 def process_customer(customer):
     customers_id  = customer["customers_id"]
@@ -187,25 +164,29 @@ def process_customer(customer):
     print(f"  Phone:         {phone}")
     print(f"  Language:      {language}")
     print(f"  Cycles missed: {cycles_missed}")
-    print(f"  Calling:       {DEMO_TO} (demo number)")
     print(f"  Message:       {message[:70]}...")
 
     for attempt in range(1, MAX_RETRIES + 1):
         print(f"  Attempt {attempt}/{MAX_RETRIES}...", end=" ")
 
-        success, result = make_call(message, name)
+        if SIMULATION_MODE:
+            success, response, detail = make_simulated_call(phone, message)
+        else:
+            success, response, detail = make_real_call(phone, message)
 
         if success:
-            print(f"SUCCESS — Call ID: {result}")
+            print(f"SUCCESS — Customer response: {response}")
             log_call(
                 customers_id, agent_id, language,
-                cycles_missed, "no_response",
-                f"Call placed via Vapi. ID: {result}. "
-                f"Awaiting customer response."
+                cycles_missed, response,
+                f"{'[SIMULATED] ' if SIMULATION_MODE else ''}"
+                f"Call placed on attempt {attempt}. "
+                f"Customer response: {response}"
             )
-            return True
+            return True, response
+
         else:
-            print(f"FAILED — {result}")
+            print(f"FAILED — {detail}")
             if attempt < MAX_RETRIES:
                 print(f"  Retrying in {RETRY_DELAY} seconds...")
                 time.sleep(RETRY_DELAY)
@@ -213,21 +194,23 @@ def process_customer(customer):
     log_call(
         customers_id, agent_id, language,
         cycles_missed, "no_response",
-        f"All {MAX_RETRIES} attempts failed."
+        f"All {MAX_RETRIES} attempts failed. Agent should visit customer."
     )
-    return False
+    return False, "no_response"
 
 def main():
+    mode = "SIMULATION MODE" if SIMULATION_MODE else "LIVE MODE"
     print("=" * 60)
-    print("VOICE CALL SYSTEM — VAPI")
+    print(f"VOICE CALL SYSTEM — {mode}")
     print(f"Run time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"Calling from: {VAPI_FROM}")
-    print(f"Demo number:  {DEMO_TO}")
     print("=" * 60)
+
+    if SIMULATION_MODE:
+        print("\n[SIM] No real calls will be made.")
+        print("[SIM] Calls and responses are simulated locally.")
 
     customers = get_missed_customers()
     print(f"\nCustomers with missed payments: {len(customers)}")
-    print("(Limited to 3 for demo)")
 
     if not customers:
         print("No missed payments found.")
@@ -249,6 +232,8 @@ def main():
     successful = 0
     failed     = 0
     skipped    = 0
+    responses  = {"already_paid": 0, "need_more_time": 0,
+                  "speak_to_agent": 0, "no_response": 0}
 
     for customer in customers:
         if already_called(customer["customers_id"]):
@@ -256,19 +241,25 @@ def main():
             skipped += 1
             continue
 
-        result = process_customer(customer)
+        result, response = process_customer(customer)
         if result:
             successful += 1
+            responses[response] = responses.get(response, 0) + 1
         else:
             failed += 1
 
-        time.sleep(5)
+        time.sleep(1)
 
     print()
     print("=" * 60)
     print(f"Calls successful: {successful}")
     print(f"Calls failed:     {failed}")
     print(f"Skipped:          {skipped}")
+    print()
+    print("Customer Responses:")
+    for resp, count in responses.items():
+        if count > 0:
+            print(f"  {resp:<20} → {count}")
     print("=" * 60)
 
     # Show recent call logs
@@ -285,7 +276,7 @@ def main():
         FROM call_logs cl
         JOIN customers cu ON cl.customers_id = cu.customers_id
         ORDER BY cl.call_time DESC
-        LIMIT 5
+        LIMIT 10
     """)
     logs = cur.fetchall()
     cur.close()
