@@ -1,17 +1,6 @@
  --BRANCHES
 CREATE TABLE branches (
-    branch_id    varchar(10) primary key,select
-    a."agent_id",
-    a."alert_id",
-    a."details",
-    a."flag_type",
-    a."risk_score",
-    a."status",
-    a."triggered_at"
-from
-    "alerts" a;
-
-
+    branch_id    varchar(10) primary key,
     branch_name  varchar(100) not null,
     region       varchar(50) not null,
     dominant_language  varchar(20) not null
@@ -66,7 +55,7 @@ CREATE TABLE ALERTS(
    risk_score integer not null,
    triggered_at timestamp not null default now(),
    status varchar(30) default 'sent' check (status in ('sent', 'acknoledged','excalated'))
-)
+);
 
 
 CREATE TABLE call_logs(
@@ -80,4 +69,4 @@ CREATE TABLE call_logs(
     outcome_notes text
 );
 
-
+'Fix schema.sql'
