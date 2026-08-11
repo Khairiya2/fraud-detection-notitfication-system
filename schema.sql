@@ -69,4 +69,4 @@ CREATE TABLE call_logs(
     outcome_notes text
 );
 
-'Fix schema.sql'
+
