@@ -21,6 +21,7 @@ CREATE TABLE agents (
 CREATE TABLE customers(
     customers_id varchar(20) primary key,
     customers_name varchar(50) not null,
+    customers_name: phone varchar(20) not null,
     agent_id varchar(20) not null references agents(agent_id),
     preferred_language varchar(50) not null,
     expected_payment_day varchar(50) not null,
