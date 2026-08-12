@@ -8,11 +8,11 @@ import os
 app = FastAPI()
 
 DB_CONFIG = {
-    "host":     "localhost",
+    "host":     "dpg-d9ufbq942hec73f9127g-a", "port": "5432",
     "port":     "5432",
-    "dbname":   "postgres",
-    "user":     "postgres",
-    "password": "riya7111#",
+    "dbname":   "fraud_detection_db_vicg",
+    "user":     "fraud_detection_db_vicg_user",
+    "password": ""u2KX7n3hepgODuHfJcIX3x1XnTdOJ7d6",
 }
 
 # Load Jinja2 directly — no FastAPI templating needed
