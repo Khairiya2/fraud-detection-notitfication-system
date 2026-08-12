@@ -12,7 +12,7 @@ DB_CONFIG = {
     "port":     "5432",
     "dbname":   "fraud_detection_db_vicg",
     "user":     "fraud_detection_db_vicg_user",
-    "password": ""u2KX7n3hepgODuHfJcIX3x1XnTdOJ7d6",
+    "password": "u2KX7n3hepgODuHfJcIX3x1XnTdOJ7d6",
 }
 
 # Load Jinja2 directly — no FastAPI templating needed
