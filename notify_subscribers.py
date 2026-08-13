@@ -39,8 +39,7 @@ DB_CONFIG = {
     "password": os.environ.get("LOCAL_DB_PASSWORD", ""),
 }
 
-# Only notify subscribers about alerts at/above this risk score.
-# Adjust to taste — lower = more emails, higher = only serious flags.
+
 MIN_RISK_SCORE = int(os.environ.get("SUBSCRIBER_ALERT_THRESHOLD", "21"))
 
 DASHBOARD_URL = os.environ.get(
@@ -108,12 +107,11 @@ def mark_notified(subscription_id, alert_id):
 
 
 def build_email(row):
-    subject = f"[FRAUD ALERT] {row['branch_name']} — Agent {row['agent_id']} Flagged"
+    subject = f"[FRAUD ALERT] {row['branch_name']} :Agent {row['agent_id']} Flagged"
     greeting = f"Dear {row['subscriber_name']}," if row["subscriber_name"] else "Hello,"
     body = f"""{greeting}
 
-This is an automated alert from the Fraud Detection System.
-An agent in your branch ({row['branch_name']}) has been flagged for suspicious activity.
+This is an automated alert from the Fraud Detection System.An agent in your branch ({row['branch_name']}) has been flagged for suspicious activity.
 
 AGENT DETAILS
 
@@ -127,8 +125,7 @@ Detected At:  {row['triggered_at']}
 Login to the monitoring dashboard for full details:
 {DASHBOARD_URL}
 
-You are receiving this because you subscribed to alerts for this branch
-on the Fraud Detection Dashboard.
+You are receiving this because you subscribed to alerts for this branch on the Fraud Detection Dashboard.
 
 Intelligent Fraud Detection & Customer Notification System
 Micro-Insurance Company Ghana
