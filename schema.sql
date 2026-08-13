@@ -21,7 +21,7 @@ CREATE TABLE agents (
 CREATE TABLE customers(
     customers_id varchar(20) primary key,
     customers_name varchar(50) not null,
-    customers_name: phone varchar(20) not null,
+    customer_phone varchar(20) not null,
     agent_id varchar(20) not null references agents(agent_id),
     preferred_language varchar(50) not null,
     expected_payment_day varchar(50) not null,
@@ -71,3 +71,21 @@ CREATE TABLE call_logs(
 );
 
 
+
+-- Branch alert email subscriptions
+CREATE TABLE IF NOT EXISTS branch_subscriptions (
+    subscription_id serial primary key,
+    branch_id varchar(10) not null references branches(branch_id),
+    name varchar(100),
+    email varchar(100) not null,
+    created_at timestamp not null default now(),
+    UNIQUE (branch_id, email)
+);
+
+-- Tracks which subscribers have been notified about which alerts
+CREATE TABLE IF NOT EXISTS subscription_notifications (
+    subscription_id integer not null references branch_subscriptions(subscription_id),
+    alert_id integer not null references alerts(alert_id),
+    notified_at timestamp not null default now(),
+    PRIMARY KEY (subscription_id, alert_id)
+);
