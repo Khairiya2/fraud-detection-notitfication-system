@@ -1,5 +1,5 @@
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Request, Form
+from fastapi.responses import HTMLResponse, RedirectResponse
 import psycopg2
 import psycopg2.extras
 from jinja2 import Environment, FileSystemLoader
@@ -7,20 +7,32 @@ import os
 
 app = FastAPI()
 
+# On Render, set the DATABASE_URL environment variable (from your Postgres
+# instance's "Connect" tab -> Internal or External Database URL) in the
+# service's Environment tab. Locally, it falls back to your local config.
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
 DB_CONFIG = {
-    "host":     "dpg-d9ufbq942hec73f9127g-a", "port": "5432",
+    "host":     "localhost",
     "port":     "5432",
-    "dbname":   "fraud_detection_db_vicg",
-    "user":     "fraud_detection_db_vicg_user",
-    "password": "u2KX7n3hepgODuHfJcIX3x1XnTdOJ7d6",
+    "dbname":   "postgres",
+    "user":     "postgres",
+    "password": "riya7111#",
 }
 
 # Load Jinja2 directly — no FastAPI templating needed
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 env = Environment(loader=FileSystemLoader(os.path.join(BASE_DIR, "templates")))
 
+def get_connection():
+    if DATABASE_URL:
+        # Render (and most managed Postgres providers) give a
+        # postgres:// or postgresql:// URL — psycopg2 accepts it directly.
+        return psycopg2.connect(DATABASE_URL)
+    return psycopg2.connect(**DB_CONFIG)
+
 def query(sql):
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = get_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute(sql)
     rows = [dict(r) for r in cur.fetchall()]
@@ -158,17 +170,27 @@ def get_branch_performance():
         ORDER BY gap_ghs DESC NULLS LAST
     """)
 
+def get_all_branches():
+    """Simple branch list (id + name) for populating the subscription dropdown."""
+    return query("""
+        SELECT branch_id, branch_name
+        FROM branches
+        ORDER BY branch_name
+    """)
+
 @app.get("/", response_class=HTMLResponse)
-def dashboard(request: Request):
+def dashboard(request: Request, subscribed: str = None):
     try:
         template = env.get_template("index.html")
         html = template.render(
-            summary  = get_summary(),
-            agents   = get_agent_risk(),
-            heatmap  = get_fraud_heatmap(),
-            missed   = get_missed_payments(),
-            trends   = get_payment_trends(),
-            branches = get_branch_performance(),
+            summary       = get_summary(),
+            agents        = get_agent_risk(),
+            heatmap       = get_fraud_heatmap(),
+            missed        = get_missed_payments(),
+            trends        = get_payment_trends(),
+            branches      = get_branch_performance(),
+            all_branches  = get_all_branches(),
+            subscribed    = subscribed,
         )
         return HTMLResponse(content=html)
     except Exception as e:
@@ -177,6 +199,33 @@ def dashboard(request: Request):
             content=f"<pre style='color:red;padding:20px;'>{traceback.format_exc()}</pre>"
         )
 
+@app.post("/api/subscribe")
+def subscribe(branch_id: str = Form(...), email: str = Form(...), name: str = Form(None)):
+    """Registers a supervisor/branch manager's email to receive alerts
+    for a whole branch. Just records the signup for now — does not send
+    any emails yet."""
+    email_clean = email.strip().lower()
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            INSERT INTO branch_subscriptions (branch_id, name, email)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (branch_id, email) DO NOTHING
+            """,
+            (branch_id, name, email_clean),
+        )
+        conn.commit()
+        status = "ok"
+    except Exception:
+        conn.rollback()
+        status = "error"
+    finally:
+        cur.close()
+        conn.close()
+    return RedirectResponse(url=f"/?subscribed={status}", status_code=303)
+
 @app.get("/api")
 def api():
     return {
@@ -184,3 +233,37 @@ def api():
         "agents":  get_agent_risk(),
         "missed":  get_missed_payments(),
     }
+
+@app.get("/api/alerts/latest")
+def latest_alert_id():
+    """Returns the current highest alert_id, so the frontend can remember
+    where it left off (used on initial page load)."""
+    row = query_one("SELECT COALESCE(MAX(alert_id), 0) AS c FROM alerts")
+    return {"latest_id": row["c"]}
+
+@app.get("/api/alerts/new")
+def new_alerts(since: int = 0):
+    """Returns any alerts with alert_id greater than `since`, newest first.
+    The dashboard polls this endpoint to detect new fraud alerts in real time."""
+    rows = query(f"""
+        SELECT
+            al.alert_id,
+            al.agent_id,
+            a.agent_name,
+            al.flag_type,
+            al.risk_score,
+            al.triggered_at,
+            al.status
+        FROM alerts al
+        JOIN agents a ON al.agent_id = a.agent_id
+        WHERE al.alert_id > {since}
+        ORDER BY al.alert_id DESC
+    """)
+    # Convert datetime objects to ISO strings for JSON
+    for r in rows:
+        if r.get("triggered_at"):
+            r["triggered_at"] = r["triggered_at"].isoformat()
+    return {"alerts": rows, "latest_id": rows[0]["alert_id"] if rows else since}
+
+if __name__ == "__main__":
+    app()

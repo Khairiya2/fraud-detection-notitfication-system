@@ -28,9 +28,113 @@
         th { background: #1e3a5f; color: white; padding: 10px; text-align: left; }
         td { padding: 8px 10px; border-bottom: 1px solid #eee; }
         tr:hover td { background: #f9f9f9; }
+
+        /* ===== Branch Alert Subscription ===== */
+        .subscribe-box {
+            background: white;
+            border: 1px solid #ddd;
+            border-left: 4px solid #1e3a5f;
+            border-radius: 8px;
+            padding: 16px 24px;
+            margin: 16px 0 24px 0;
+        }
+        .subscribe-box h3 {
+            margin: 0 0 4px 0;
+            color: #1e3a5f;
+            font-size: 16px;
+        }
+        .subscribe-box p {
+            margin: 0 0 12px 0;
+            color: #666;
+            font-size: 13px;
+        }
+        .subscribe-form {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .subscribe-form input, .subscribe-form select {
+            padding: 8px 10px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+        .subscribe-form input[type="email"] { min-width: 220px; }
+        .subscribe-form input[type="text"] { min-width: 160px; }
+        .subscribe-form button {
+            background: #1e3a5f;
+            color: white;
+            border: none;
+            padding: 9px 18px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .subscribe-form button:hover { background: #16283f; }
+        .subscribe-msg {
+            margin-top: 10px;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            display: inline-block;
+        }
+        .subscribe-msg.ok { background: #dcfce7; color: #166534; }
+        .subscribe-msg.error { background: #fee2e2; color: #991b1b; }
+
+        /* ===== Fraud Alert Notifications ===== */
+        #alert-badge {
+            position: fixed;
+            top: 16px;
+            right: 16px;
+            background: #dc2626;
+            color: white;
+            font-weight: 700;
+            font-size: 13px;
+            padding: 6px 12px;
+            border-radius: 999px;
+            display: none;
+            z-index: 1000;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+            cursor: pointer;
+        }
+        #toast-container {
+            position: fixed;
+            top: 16px;
+            right: 16px;
+            z-index: 1001;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .toast {
+            background: #1e3a5f;
+            color: white;
+            padding: 14px 18px;
+            border-radius: 8px;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.3);
+            min-width: 280px;
+            max-width: 360px;
+            border-left: 4px solid #f59e0b;
+            animation: slideIn 0.25s ease-out;
+            font-size: 14px;
+        }
+        .toast strong { color: #f59e0b; }
+        .toast .toast-meta { color: #b7c3d6; font-size: 12px; margin-top: 4px; }
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to   { transform: translateX(0);    opacity: 1; }
+        }
+        @keyframes fadeOut {
+            to { opacity: 0; transform: translateX(20px); }
+        }
     </style>
 </head>
 <body>
+
+<div id="alert-badge" title="Click to dismiss"></div>
+<div id="toast-container"></div>
 
 <h1>Fraud Detection Dashboard</h1>
 <p style="color:#666;">Micro-Insurance Premium Collection Monitoring Ghana</p>
@@ -53,6 +157,28 @@
         <div class="num red">GHS {{ summary.total_gap }}</div>
         <div class="lbl">Revenue Gap</div>
     </div>
+</div>
+
+<!-- BRANCH ALERT SUBSCRIPTION -->
+<div class="subscribe-box">
+    <h3>Get Alert Notifications</h3>
+    <p>Branch managers and supervisors — register your email to be notified about fraud alerts for your branch.</p>
+    <form class="subscribe-form" action="/api/subscribe" method="post">
+        <input type="text" name="name" placeholder="Your name (optional)">
+        <select name="branch_id" required>
+            <option value="" disabled selected>Select your branch</option>
+            {% for b in all_branches %}
+            <option value="{{ b.branch_id }}">{{ b.branch_name }}</option>
+            {% endfor %}
+        </select>
+        <input type="email" name="email" placeholder="you@company.com" required>
+        <button type="submit">Subscribe</button>
+    </form>
+    {% if subscribed == "ok" %}
+    <div class="subscribe-msg ok">✓ You're subscribed! You'll be notified about alerts for this branch.</div>
+    {% elif subscribed == "error" %}
+    <div class="subscribe-msg error">Something went wrong — please try again.</div>
+    {% endif %}
 </div>
 
 <!-- AGENT RISK -->
@@ -195,7 +321,99 @@
 <p style="color:#aaa;font-size:12px;margin-top:32px;text-align:center;">
     Fraud Detection System — Ghana Micro-Insurance
 </p>
+
 <script>
+    // ===== Fraud Alert Notifications =====
+    // Uses sessionStorage so the "last seen alert" survives the page's
+    // own 30-second auto-reload below, instead of resetting every time.
+    (function () {
+        const POLL_INTERVAL_MS = 15000; // check every 15 seconds
+        const badge = document.getElementById('alert-badge');
+        const toastContainer = document.getElementById('toast-container');
+
+        function getLastSeenId() {
+            return parseInt(sessionStorage.getItem('fraud_last_seen_alert_id') || '0', 10);
+        }
+        function setLastSeenId(id) {
+            sessionStorage.setItem('fraud_last_seen_alert_id', id);
+        }
+        function getUnseenCount() {
+            return parseInt(sessionStorage.getItem('fraud_unseen_count') || '0', 10);
+        }
+        function setUnseenCount(n) {
+            sessionStorage.setItem('fraud_unseen_count', n);
+        }
+
+        function updateBadge() {
+            const unseen = getUnseenCount();
+            if (unseen > 0) {
+                badge.textContent = unseen + ' new alert' + (unseen > 1 ? 's' : '');
+                badge.style.display = 'block';
+            } else {
+                badge.style.display = 'none';
+            }
+        }
+
+        function showToast(alert) {
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            const time = new Date(alert.triggered_at).toLocaleTimeString();
+            toast.innerHTML =
+                '<div><strong>⚠ Fraud Alert</strong></div>' +
+                '<div>' + alert.agent_name + ' (' + alert.agent_id + ') — ' + alert.flag_type + '</div>' +
+                '<div class="toast-meta">Risk score: ' + alert.risk_score + ' · ' + time + '</div>';
+            toastContainer.appendChild(toast);
+
+            setTimeout(function () {
+                toast.style.animation = 'fadeOut 0.3s ease-in forwards';
+                setTimeout(function () { toast.remove(); }, 300);
+            }, 8000);
+        }
+
+        async function initBaseline() {
+            // Only set a baseline the very first time this browser tab
+            // sees the dashboard in this session - not on every 30s reload,
+            // so alerts that arrive between reloads still get caught.
+            if (sessionStorage.getItem('fraud_last_seen_alert_id') === null) {
+                try {
+                    const res = await fetch('/api/alerts/latest');
+                    const data = await res.json();
+                    setLastSeenId(data.latest_id);
+                } catch (e) {
+                    console.error('Failed to init alert baseline', e);
+                }
+            }
+        }
+
+        async function pollForAlerts() {
+            try {
+                const since = getLastSeenId();
+                const res = await fetch('/api/alerts/new?since=' + since);
+                const data = await res.json();
+                if (data.alerts && data.alerts.length > 0) {
+                    data.alerts.slice().reverse().forEach(showToast);
+                    setUnseenCount(getUnseenCount() + data.alerts.length);
+                    setLastSeenId(data.latest_id);
+                    updateBadge();
+                }
+            } catch (e) {
+                console.error('Alert polling failed', e);
+            }
+        }
+
+        badge.addEventListener('click', function () {
+            setUnseenCount(0);
+            updateBadge();
+        });
+
+        updateBadge(); // reflect any unseen count carried over from before reload
+        initBaseline().then(function () {
+            pollForAlerts(); // check immediately, then on interval
+            setInterval(pollForAlerts, POLL_INTERVAL_MS);
+        });
+    })();
+
+    // Existing full-page refresh to pull fresh table data
     setTimeout(function(){ location.reload(); }, 30000);
 </script>
 
