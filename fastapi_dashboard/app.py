@@ -12,9 +12,7 @@ from datetime import datetime
 
 app = FastAPI()
 
-# On Render, set the DATABASE_URL environment variable (from your Postgres
-# instance's "Connect" tab -> Internal or External Database URL) in the
-# service's Environment tab. Locally, it falls back to your local config.
+
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 DB_CONFIG = {
