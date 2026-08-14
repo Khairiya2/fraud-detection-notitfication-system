@@ -29,17 +29,15 @@ DB_CONFIG = {
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 env = Environment(loader=FileSystemLoader(os.path.join(BASE_DIR, "templates")))
 
-# ===== Background subscriber email notifications =====
-# Set these as environment variables on Render (Environment tab).
-# Never hardcode real credentials here.
+#Background subscriber email notifications
 GMAIL_ADDRESS = os.environ.get("GMAIL_ADDRESS")
 GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD")
 
-# How often (seconds) the background task checks for new alerts to notify
+
 # subscribers about. Default: every 5 minutes.
 NOTIFY_INTERVAL_SECONDS = int(os.environ.get("NOTIFY_INTERVAL_SECONDS", "300"))
 
-# Only notify subscribers about alerts at/above this risk score.
+# Only notify subscribers about alerts at/above  risk score.
 SUBSCRIBER_ALERT_THRESHOLD = int(os.environ.get("SUBSCRIBER_ALERT_THRESHOLD", "21"))
 
 DASHBOARD_URL = os.environ.get(
@@ -200,7 +198,7 @@ def get_all_branches():
         ORDER BY branch_name
     """)
 
-# ===== Background subscriber email notifications =====
+#subscriber email notifications
 
 def get_unnotified_subscriber_alerts():
     return query(f"""
@@ -247,8 +245,7 @@ def build_subscriber_email(row):
     greeting = f"Dear {row['subscriber_name']}," if row.get("subscriber_name") else "Hello,"
     body = f"""{greeting}
 
-This is an automated alert from the Fraud Detection System.
-An agent in your branch ({row['branch_name']}) has been flagged for suspicious activity.
+This is an automated alert from the Fraud Detection System. An agent in your branch ({row['branch_name']}) has been flagged for suspicious activity.
 
 AGENT DETAILS
 
@@ -262,8 +259,7 @@ Detected At:  {row['triggered_at']}
 Login to the monitoring dashboard for full details:
 {DASHBOARD_URL}
 
-You are receiving this because you subscribed to alerts for this branch
-on the Fraud Detection Dashboard.
+You are receiving this because you subscribed to alerts for this branch on the Fraud Detection Dashboard.
 
 Intelligent Fraud Detection & Customer Notification System
 Micro-Insurance Company Ghana
@@ -409,8 +405,7 @@ def new_alerts(since: int = 0):
 @app.post("/api/notify-subscribers-now")
 def notify_subscribers_now():
     """Manually triggers a subscriber-notification check immediately,
-    instead of waiting for the background loop's next run. Useful for
-    testing right after subscribing or after a new alert is generated."""
+    instead of waiting for the background loop's next run.."""
     run_subscriber_notifications()
     return {"status": "triggered"}
 
