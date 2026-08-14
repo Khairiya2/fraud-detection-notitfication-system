@@ -29,7 +29,7 @@
         td { padding: 8px 10px; border-bottom: 1px solid #eee; }
         tr:hover td { background: #f9f9f9; }
 
-        /* ===== Branch Alert Subscription ===== */
+        /*Branch Alert Subscription*/
         .subscribe-box {
             background: white;
             border: 1px solid #ddd;
@@ -83,7 +83,7 @@
         .subscribe-msg.ok { background: #dcfce7; color: #166534; }
         .subscribe-msg.error { background: #fee2e2; color: #991b1b; }
 
-        /* ===== Fraud Alert Notifications ===== */
+        /*Fraud Alert Notifications*/
         #alert-badge {
             position: fixed;
             top: 16px;
@@ -162,7 +162,7 @@
 <!-- BRANCH ALERT SUBSCRIPTION -->
 <div class="subscribe-box">
     <h3>Get Alert Notifications</h3>
-    <p>Branch managers and supervisors — register your email to be notified about fraud alerts for your branch.</p>
+    <p>Branch managers and supervisors: register your email to be notified about fraud alerts for your branch.</p>
     <form class="subscribe-form" action="/api/subscribe" method="post">
         <input type="text" name="name" placeholder="Your name (optional)">
         <select name="branch_id" required>
@@ -175,7 +175,7 @@
         <button type="submit">Get Alerts</button>
     </form>
     {% if subscribed == "ok" %}
-    <div class="subscribe-msg ok">✓ You're subscribed! You'll be notified about alerts for this branch.</div>
+    <div class="subscribe-msg ok">You're subscribed! You'll be notified about alerts for this branch.</div>
     {% elif subscribed == "error" %}
     <div class="subscribe-msg error">Something went wrong — please try again.</div>
     {% endif %}
@@ -323,7 +323,7 @@
 </p>
 
 <script>
-    // ===== Fraud Alert Notifications =====
+    // Fraud Alert Notifications
     // Uses sessionStorage so the "last seen alert" survives the page's
     // own 30-second auto-reload below, instead of resetting every time.
     (function () {
@@ -372,7 +372,7 @@
 
         async function initBaseline() {
             // Only set a baseline the very first time this browser tab
-            // sees the dashboard in this session - not on every 30s reload,
+            // sees the dashboard in this session, not on every 30s reload,
             // so alerts that arrive between reloads still get caught.
             if (sessionStorage.getItem('fraud_last_seen_alert_id') === null) {
                 try {
