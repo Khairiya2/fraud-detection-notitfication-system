@@ -4,6 +4,11 @@ import psycopg2
 import psycopg2.extras
 from jinja2 import Environment, FileSystemLoader
 import os
+import asyncio
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from datetime import datetime
 
 app = FastAPI()
 
@@ -20,14 +25,31 @@ DB_CONFIG = {
     "password": "riya7111#",
 }
 
-# Load Jinja2 directly — no FastAPI templating needed
+# Load Jinja2 directly, no FastAPI templating needed
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 env = Environment(loader=FileSystemLoader(os.path.join(BASE_DIR, "templates")))
+
+# ===== Background subscriber email notifications =====
+# Set these as environment variables on Render (Environment tab).
+# Never hardcode real credentials here.
+GMAIL_ADDRESS = os.environ.get("GMAIL_ADDRESS")
+GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD")
+
+# How often (seconds) the background task checks for new alerts to notify
+# subscribers about. Default: every 5 minutes.
+NOTIFY_INTERVAL_SECONDS = int(os.environ.get("NOTIFY_INTERVAL_SECONDS", "300"))
+
+# Only notify subscribers about alerts at/above this risk score.
+SUBSCRIBER_ALERT_THRESHOLD = int(os.environ.get("SUBSCRIBER_ALERT_THRESHOLD", "21"))
+
+DASHBOARD_URL = os.environ.get(
+    "DASHBOARD_URL", "https://fraud-detection-notitfication-system-1.onrender.com"
+)
 
 def get_connection():
     if DATABASE_URL:
         # Render (and most managed Postgres providers) give a
-        # postgres:// or postgresql:// URL — psycopg2 accepts it directly.
+        # postgres:// or postgresql:// URL, psycopg2 accepts it directly.
         return psycopg2.connect(DATABASE_URL)
     return psycopg2.connect(**DB_CONFIG)
 
@@ -178,6 +200,125 @@ def get_all_branches():
         ORDER BY branch_name
     """)
 
+# ===== Background subscriber email notifications =====
+
+def get_unnotified_subscriber_alerts():
+    return query(f"""
+        SELECT
+            bs.subscription_id,
+            bs.email          AS subscriber_email,
+            bs.name           AS subscriber_name,
+            b.branch_name,
+            al.alert_id,
+            al.agent_id,
+            a.agent_name,
+            al.flag_type,
+            al.risk_score,
+            al.triggered_at
+        FROM alerts al
+        JOIN agents a   ON al.agent_id  = a.agent_id
+        JOIN branches b ON a.branch_id  = b.branch_id
+        JOIN branch_subscriptions bs ON bs.branch_id = b.branch_id
+        LEFT JOIN subscription_notifications sn
+            ON sn.subscription_id = bs.subscription_id
+           AND sn.alert_id        = al.alert_id
+        WHERE al.risk_score >= {SUBSCRIBER_ALERT_THRESHOLD}
+          AND sn.subscription_id IS NULL
+        ORDER BY al.alert_id ASC
+    """)
+
+def mark_subscriber_notified(subscription_id, alert_id):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO subscription_notifications (subscription_id, alert_id)
+        VALUES (%s, %s)
+        ON CONFLICT (subscription_id, alert_id) DO NOTHING
+        """,
+        (subscription_id, alert_id),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+def build_subscriber_email(row):
+    subject = f"[FRAUD ALERT] {row['branch_name']}: Agent {row['agent_id']} Flagged"
+    greeting = f"Dear {row['subscriber_name']}," if row.get("subscriber_name") else "Hello,"
+    body = f"""{greeting}
+
+This is an automated alert from the Fraud Detection System.
+An agent in your branch ({row['branch_name']}) has been flagged for suspicious activity.
+
+AGENT DETAILS
+
+Agent ID:     {row['agent_id']}
+Agent Name:   {row['agent_name']}
+Branch:       {row['branch_name']}
+Risk Score:   {row['risk_score']}
+Flags:        {row['flag_type']}
+Detected At:  {row['triggered_at']}
+
+Login to the monitoring dashboard for full details:
+{DASHBOARD_URL}
+
+You are receiving this because you subscribed to alerts for this branch
+on the Fraud Detection Dashboard.
+
+Intelligent Fraud Detection & Customer Notification System
+Micro-Insurance Company Ghana
+Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+"""
+    return subject, body
+
+def send_subscriber_email(to_email, subject, body):
+    msg = MIMEMultipart()
+    msg["From"] = GMAIL_ADDRESS
+    msg["To"] = to_email
+    msg["Subject"] = subject
+    msg.attach(MIMEText(body, "plain"))
+    with smtplib.SMTP("smtp.gmail.com", 587) as server:
+        server.starttls()
+        server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
+        server.sendmail(GMAIL_ADDRESS, to_email, msg.as_string())
+
+def run_subscriber_notifications():
+    """Checks for any new alerts subscribers haven't been emailed about
+    yet, and sends them. Safe to call repeatedly, already-notified
+    alerts are skipped via subscription_notifications."""
+    if not GMAIL_ADDRESS or not GMAIL_APP_PASSWORD:
+        print("[notify] Skipped: GMAIL_ADDRESS / GMAIL_APP_PASSWORD not set.")
+        return
+    try:
+        pending = get_unnotified_subscriber_alerts()
+    except Exception as e:
+        print(f"[notify] Failed to query pending alerts: {e}")
+        return
+    if not pending:
+        return
+    print(f"[notify] Sending {len(pending)} subscriber notification(s)...")
+    for row in pending:
+        try:
+            subject, body = build_subscriber_email(row)
+            send_subscriber_email(row["subscriber_email"], subject, body)
+            mark_subscriber_notified(row["subscription_id"], row["alert_id"])
+            print(f"[notify] Sent to {row['subscriber_email']} "
+                  f"- Agent {row['agent_id']} (alert #{row['alert_id']})")
+        except Exception as e:
+            print(f"[notify] Failed for {row['subscriber_email']} "
+                  f"(alert #{row['alert_id']}): {e}")
+
+async def notification_loop():
+    """Runs in the background for the lifetime of the app, checking for
+    new alerts to notify subscribers about every NOTIFY_INTERVAL_SECONDS."""
+    while True:
+        await asyncio.to_thread(run_subscriber_notifications)
+        await asyncio.sleep(NOTIFY_INTERVAL_SECONDS)
+
+@app.on_event("startup")
+async def start_background_tasks():
+    asyncio.create_task(notification_loop())
+
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, subscribed: str = None):
     try:
@@ -202,7 +343,7 @@ def dashboard(request: Request, subscribed: str = None):
 @app.post("/api/subscribe")
 def subscribe(branch_id: str = Form(...), email: str = Form(...), name: str = Form(None)):
     """Registers a supervisor/branch manager's email to receive alerts
-    for a whole branch. Just records the signup for now — does not send
+    for a whole branch. Just records the signup for now, does not send
     any emails yet."""
     email_clean = email.strip().lower()
     conn = get_connection()
@@ -264,6 +405,14 @@ def new_alerts(since: int = 0):
         if r.get("triggered_at"):
             r["triggered_at"] = r["triggered_at"].isoformat()
     return {"alerts": rows, "latest_id": rows[0]["alert_id"] if rows else since}
+
+@app.post("/api/notify-subscribers-now")
+def notify_subscribers_now():
+    """Manually triggers a subscriber-notification check immediately,
+    instead of waiting for the background loop's next run. Useful for
+    testing right after subscribing or after a new alert is generated."""
+    run_subscriber_notifications()
+    return {"status": "triggered"}
 
 if __name__ == "__main__":
     app()
